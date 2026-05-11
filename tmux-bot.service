@@ -1,0 +1,16 @@
+[Unit]
+Description=Telegram tmux Manager Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/telegram-tmux-bot
+ExecStart=/path/to/telegram-tmux-bot/venv/bin/python3 /path/to/telegram-tmux-bot/bot.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
