@@ -2,7 +2,7 @@
 #  bot.py  —  Main Telegram Bot  (python-telegram-bot v20+)
 #  Features:
 #    /start /help /sessions /status /new /kill /killall
-#    /restart /logs /send  + Inline Buttons with confirmations
+#    /restart /logs /send  + Inline Buttons + Bottom Menu
 # ============================================================
 
 import logging
@@ -10,7 +10,8 @@ import html
 from datetime import datetime
 
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    ReplyKeyboardMarkup, KeyboardButton, BotCommand
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -43,6 +44,24 @@ def authorized(update: Update) -> bool:
         logger.warning(f"Unauthorized access attempt from chat_id={uid}")
         return False
     return True
+
+
+# ╔══════════════════════════════════════════════════════════╗
+#  PERSISTENT BOTTOM MENU KEYBOARD
+# ╚══════════════════════════════════════════════════════════╝
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Chat ke neeche hamesha dikhne wala menu."""
+    buttons = [
+        [KeyboardButton("📋 Sessions"),  KeyboardButton("📊 System Status")],
+        [KeyboardButton("➕ New Session"), KeyboardButton("💣 Kill All")],
+        [KeyboardButton("❓ Help")],
+    ]
+    return ReplyKeyboardMarkup(
+        buttons,
+        resize_keyboard=True,      # Keyboard compact rahega
+        persistent=True,           # Hamesha dikhta rahega
+        input_field_placeholder="Menu se select karo ya command type karo..."
+    )
 
 
 # ╔══════════════════════════════════════════════════════════╗
@@ -104,9 +123,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👋 *{config.BOT_NAME}*\n\n"
         "tmux sessions ko Telegram se control karo!\n\n"
-        "➡️ /help  — Sabhi commands dekho\n"
-        "➡️ /sessions  — Sessions list + Inline Buttons",
-        parse_mode=ParseMode.MARKDOWN
+        "📌 *Neeche menu buttons hain — bas tap karo!*\n"
+        "Ya commands type karo: /help",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_menu_keyboard()
     )
 
 
@@ -394,15 +414,68 @@ async def unknown_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ── Menu Button Text Handler ──────────────────────────────────
+MENU_MAP = {
+    "📋 Sessions":     cmd_sessions,
+    "📊 System Status": cmd_status,
+    "❓ Help":          cmd_help,
+}
+
+async def menu_button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Bottom menu buttons ka text pakad kar sahi command chalao."""
+    if not authorized(update): return
+    text = update.message.text
+
+    if text in MENU_MAP:
+        await MENU_MAP[text](update, ctx)
+
+    elif text == "➕ New Session":
+        await update.message.reply_text(
+            "➕ *Nayi Session Banao*\n\n"
+            "Command bhejo:\n"
+            "`/new <name> <command>`\n\n"
+            "*Examples:*\n"
+            "`/new trading python3 bot.py`\n"
+            "`/new monitor htop`\n"
+            "`/new myapp bash run.sh`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    elif text == "💣 Kill All":
+        await cmd_killall(update, ctx)
+
+
 # ╔══════════════════════════════════════════════════════════╗
 #  MAIN
 # ╚══════════════════════════════════════════════════════════╝
+async def post_init(app):
+    """Bot start hone par BotCommand list register karo (/ menu ke liye)."""
+    await app.bot.set_my_commands([
+        BotCommand("start",    "👋 Welcome + Menu dikhao"),
+        BotCommand("sessions", "📋 Sabhi tmux sessions"),
+        BotCommand("status",   "📊 VPS CPU/RAM/Disk stats"),
+        BotCommand("new",      "➕ Nayi session banao"),
+        BotCommand("kill",     "💀 Ek session kill karo"),
+        BotCommand("killall",  "💣 Sabhi sessions kill karo"),
+        BotCommand("restart",  "🔁 Session restart karo"),
+        BotCommand("logs",     "📄 Session output dekho"),
+        BotCommand("send",     "⌨️ Session mein command bhejo"),
+        BotCommand("help",     "❓ Sab commands ki list"),
+    ])
+    logger.info("✅ BotCommands register ho gaye.")
+
+
 def main():
     logger.info("🚀 Telegram tmux Bot shuru ho raha hai...")
 
-    app = Application.builder().token(config.BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(config.BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
-    # Commands
+    # ── Slash Commands ────────────────────────────────────────
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("help",     cmd_help))
     app.add_handler(CommandHandler("sessions", cmd_sessions))
@@ -414,10 +487,16 @@ def main():
     app.add_handler(CommandHandler("logs",     cmd_logs))
     app.add_handler(CommandHandler("send",     cmd_send))
 
-    # Inline button callbacks
+    # ── Inline Button Callbacks ───────────────────────────────
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Unknown commands
+    # ── Bottom Menu Button Text Handler ──────────────────────
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        menu_button_handler
+    ))
+
+    # ── Unknown Commands ──────────────────────────────────────
     app.add_handler(MessageHandler(filters.COMMAND, unknown_cmd))
 
     logger.info("✅ Bot ready! Polling shuru...")
